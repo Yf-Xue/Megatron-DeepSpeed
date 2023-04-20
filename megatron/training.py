@@ -964,6 +964,7 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             total_loss_dict[nan_iters_key])
         log_string += ' samples per second: {:.3f} |'.format(samples_per_sec)
         log_string += ' TFLOPs: {:.2f} |'.format(tflops)
+        log_string += ' Model Params (B): {:.1f} |'.format(approx_parameters_in_billions)
         total_loss_dict[advanced_iters_key] = 0
         total_loss_dict[skipped_iters_key] = 0
         total_loss_dict[nan_iters_key] = 0
