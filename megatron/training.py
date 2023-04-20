@@ -46,6 +46,7 @@ from megatron.initialize import write_args_to_tensorboard
 from megatron.learning_rates import AnnealingLR
 from megatron.model import DistributedDataParallel as LocalDDP
 from megatron.utils import check_adlr_autoresume_termination
+from megatron.utils import get_parameters_in_billions
 from megatron.utils import unwrap_model
 from megatron.data.data_samplers import build_pretraining_data_loader
 from megatron.utils import calc_params_l2_norm
@@ -182,6 +183,8 @@ def pretrain(train_valid_test_dataset_provider,
     # Print setup timing.
     print_rank_0('done with setup ...')
     timers.log(['model-and-optimizer-setup', 'train/valid/test-data-iterators-setup'])
+
+    print('Model Params (B): {:.1f} |'.format(get_parameters_in_billions(model)), flush=True)
     print_rank_0('training ...')
 
     
