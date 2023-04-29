@@ -19,6 +19,7 @@ import random
 import os
 import time
 
+import nvtx
 import numpy as np
 import torch
 from megatron import fused_kernels
@@ -33,6 +34,7 @@ from deepspeed.accelerator import get_accelerator
 import deepspeed
 import deepspeed.utils.groups as groups
 
+@nvtx.annotate("initialize_megatron", color="black")
 def initialize_megatron(extra_args_provider=None, args_defaults={},
                         ignore_unknown_args=False, allow_no_cuda=False):
     """Set global variables, initialize distributed, and

@@ -69,6 +69,7 @@ def print_datetime(string):
     print_rank_0('[' + string + '] datetime: {} '.format(time_str))
 
 
+@nvtx.annotate("pretrain", color="white")
 def pretrain(train_valid_test_dataset_provider,
              model_provider,
              forward_step_func,
@@ -621,8 +622,9 @@ def train_step(forward_step_func, data_iterator,
     # All-reduce if needed.
     if not args.deepspeed and args.DDP_impl == 'local':
         timers('backward-params-all-reduce').start()
-        for model_module in model:
-            model_module.allreduce_gradients()
+        with nvtx.annotate("allreduce_gradients", color="yellow"):
+            for model_module in model:
+                model_module.allreduce_gradients()
         timers('backward-params-all-reduce').stop()
 
     # All-reduce word_embeddings' grad across first and last stages to ensure
@@ -994,6 +996,7 @@ def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler):
     timers.log(['save-checkpoint'])
 
 
+@nvtx.annotate("train", color="purple")
 def train(forward_step_func, model, optimizer, lr_scheduler,
           train_data_iterator, valid_data_iterator):
     """Train the model function."""
