@@ -623,8 +623,8 @@ def train_step(forward_step_func, data_iterator,
     if not args.deepspeed and args.DDP_impl == 'local':
         with nvtx.annotate("backward-params-all-reduce", color="yellow"):
             timers('backward-params-all-reduce').start()
-                for model_module in model:
-                    model_module.allreduce_gradients()
+            for model_module in model:
+                model_module.allreduce_gradients()
             timers('backward-params-all-reduce').stop()
 
     # All-reduce word_embeddings' grad across first and last stages to ensure
