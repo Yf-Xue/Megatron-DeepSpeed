@@ -142,7 +142,7 @@ def pretrain(train_valid_test_dataset_provider,
                    'scheduler are built')
 
     # Data stuff.
-    with nvtx.annotate("Dataloader build", color="purple"):
+    with nvtx.annotate("Build all data iterators", color="purple"):
         timers('train/valid/test-data-iterators-setup').start()
         if args.virtual_pipeline_model_parallel_size is not None:
             all_data_iterators = [
@@ -617,10 +617,11 @@ def train_step(forward_step_func, data_iterator,
 
     # All-reduce if needed.
     if not args.deepspeed and args.DDP_impl == 'local':
-        timers('backward-params-all-reduce').start()
-        for model_module in model:
-            model_module.allreduce_gradients()
-        timers('backward-params-all-reduce').stop()
+        with nvtx.annotate('all reduce params', color='yellow')
+            timers('backward-params-all-reduce').start()
+            for model_module in model:
+                model_module.allreduce_gradients()
+            timers('backward-params-all-reduce').stop()
 
     # All-reduce word_embeddings' grad across first and last stages to ensure
     # that word_embeddings parameters stay in sync.
@@ -644,20 +645,22 @@ def train_step(forward_step_func, data_iterator,
                     grad = word_embeddings_weight.main_grad
                 else:
                     grad = word_embeddings_weight.grad
-                torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+                with nvtx.annotate('all reduce embedding grad', color='yellow')
+                    torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
     timers('backward-embedding-all-reduce').stop()
 
     # Update parameters.
-    timers('optimizer').start()
-    if args.deepspeed:
-        increment = get_num_microbatches() * \
-                    args.micro_batch_size * \
-                    args.data_parallel_size
-        model[0].step(lr_kwargs={'increment': increment})
-        update_successful = model[0].was_step_applied()
-    else:
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
-    timers('optimizer').stop()
+    with nvtx.annotate("Update parameters", color="purple"):
+        timers('optimizer').start()
+        if args.deepspeed:
+            increment = get_num_microbatches() * \
+                        args.micro_batch_size * \
+                        args.data_parallel_size
+            model[0].step(lr_kwargs={'increment': increment})
+            update_successful = model[0].was_step_applied()
+        else:
+            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        timers('optimizer').stop()
 
     # Update learning rate.
     if args.deepspeed:
