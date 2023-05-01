@@ -69,6 +69,7 @@ def print_datetime(string):
     print_rank_0('[' + string + '] datetime: {} '.format(time_str))
 
 
+@nvtx.annotate("pretrain", color="white")
 def pretrain(train_valid_test_dataset_provider,
              model_provider,
              forward_step_func,
@@ -620,47 +621,50 @@ def train_step(forward_step_func, data_iterator,
 
     # All-reduce if needed.
     if not args.deepspeed and args.DDP_impl == 'local':
-        timers('backward-params-all-reduce').start()
-        for model_module in model:
-            model_module.allreduce_gradients()
-        timers('backward-params-all-reduce').stop()
+        with nvtx.annotate("backward-params-all-reduce", color="yellow"):
+            timers('backward-params-all-reduce').start()
+            for model_module in model:
+                model_module.allreduce_gradients()
+            timers('backward-params-all-reduce').stop()
 
     # All-reduce word_embeddings' grad across first and last stages to ensure
     # that word_embeddings parameters stay in sync.
     # This should only run for models that support pipelined model parallelism
     # (BERT and GPT-2).
-    timers('backward-embedding-all-reduce').start()
-    if not args.deepspeed:
-        if (mpu.is_pipeline_first_stage(ignore_virtual=True) or
-            mpu.is_pipeline_last_stage(ignore_virtual=True)) and \
-                mpu.get_pipeline_model_parallel_world_size() > 1:
-            if mpu.is_pipeline_first_stage(ignore_virtual=True):
-                unwrapped_model = model[0]
-            elif mpu.is_pipeline_last_stage(ignore_virtual=True):
-                unwrapped_model = model[-1]
-            unwrapped_model = unwrap_model(
-                unwrapped_model, (torchDDP, LocalDDP, Float16Module))
+    with nvtx.annotate("backward-embedding-all-reduce", color="yellow"):
+        timers('backward-embedding-all-reduce').start()
+        if not args.deepspeed:
+            if (mpu.is_pipeline_first_stage(ignore_virtual=True) or
+                mpu.is_pipeline_last_stage(ignore_virtual=True)) and \
+                    mpu.get_pipeline_model_parallel_world_size() > 1:
+                if mpu.is_pipeline_first_stage(ignore_virtual=True):
+                    unwrapped_model = model[0]
+                elif mpu.is_pipeline_last_stage(ignore_virtual=True):
+                    unwrapped_model = model[-1]
+                unwrapped_model = unwrap_model(
+                    unwrapped_model, (torchDDP, LocalDDP, Float16Module))
 
-            if unwrapped_model.share_word_embeddings:
-                word_embeddings_weight = unwrapped_model.word_embeddings_weight()
-                if args.DDP_impl == 'local':
-                    grad = word_embeddings_weight.main_grad
-                else:
-                    grad = word_embeddings_weight.grad
-                torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
-    timers('backward-embedding-all-reduce').stop()
+                if unwrapped_model.share_word_embeddings:
+                    word_embeddings_weight = unwrapped_model.word_embeddings_weight()
+                    if args.DDP_impl == 'local':
+                        grad = word_embeddings_weight.main_grad
+                    else:
+                        grad = word_embeddings_weight.grad
+                    torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+        timers('backward-embedding-all-reduce').stop()
 
     # Update parameters.
-    timers('optimizer').start()
-    if args.deepspeed:
-        increment = get_num_microbatches() * \
-                    args.micro_batch_size * \
-                    args.data_parallel_size
-        model[0].step(lr_kwargs={'increment': increment})
-        update_successful = model[0].was_step_applied()
-    else:
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
-    timers('optimizer').stop()
+    with nvtx.annotate("optimizer", color="green"):
+        timers('optimizer').start()
+        if args.deepspeed:
+            increment = get_num_microbatches() * \
+                        args.micro_batch_size * \
+                        args.data_parallel_size
+            model[0].step(lr_kwargs={'increment': increment})
+            update_successful = model[0].was_step_applied()
+        else:
+            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        timers('optimizer').stop()
 
     # Update learning rate.
     if args.deepspeed:
@@ -994,6 +998,7 @@ def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler):
     timers.log(['save-checkpoint'])
 
 
+@nvtx.annotate("train", color="purple")
 def train(forward_step_func, model, optimizer, lr_scheduler,
           train_data_iterator, valid_data_iterator):
     """Train the model function."""
