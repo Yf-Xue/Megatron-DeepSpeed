@@ -46,6 +46,7 @@ from megatron.initialize import write_args_to_tensorboard
 from megatron.learning_rates import AnnealingLR
 from megatron.model import DistributedDataParallel as LocalDDP
 from megatron.utils import check_adlr_autoresume_termination
+from megatron.utils import get_parameters_in_billions
 from megatron.utils import unwrap_model
 from megatron.data.data_samplers import build_pretraining_data_loader
 from megatron.utils import calc_params_l2_norm
@@ -68,6 +69,7 @@ def print_datetime(string):
     print_rank_0('[' + string + '] datetime: {} '.format(time_str))
 
 
+@nvtx.annotate("pretrain", color="white")
 def pretrain(train_valid_test_dataset_provider,
              model_provider,
              forward_step_func,
@@ -182,6 +184,8 @@ def pretrain(train_valid_test_dataset_provider,
     # Print setup timing.
     print_rank_0('done with setup ...')
     timers.log(['model-and-optimizer-setup', 'train/valid/test-data-iterators-setup'])
+
+    print('Model Params (B): {:.1f}'.format(get_parameters_in_billions(model)), flush=True)
     print_rank_0('training ...')
 
     
@@ -617,7 +621,7 @@ def train_step(forward_step_func, data_iterator,
 
     # All-reduce if needed.
     if not args.deepspeed and args.DDP_impl == 'local':
-        with nvtx.annotate('all reduce params', color='yellow')
+        with nvtx.annotate("backward-params-all-reduce", color="yellow"):
             timers('backward-params-all-reduce').start()
             for model_module in model:
                 model_module.allreduce_gradients()
@@ -627,30 +631,30 @@ def train_step(forward_step_func, data_iterator,
     # that word_embeddings parameters stay in sync.
     # This should only run for models that support pipelined model parallelism
     # (BERT and GPT-2).
-    timers('backward-embedding-all-reduce').start()
-    if not args.deepspeed:
-        if (mpu.is_pipeline_first_stage(ignore_virtual=True) or
-            mpu.is_pipeline_last_stage(ignore_virtual=True)) and \
-                mpu.get_pipeline_model_parallel_world_size() > 1:
-            if mpu.is_pipeline_first_stage(ignore_virtual=True):
-                unwrapped_model = model[0]
-            elif mpu.is_pipeline_last_stage(ignore_virtual=True):
-                unwrapped_model = model[-1]
-            unwrapped_model = unwrap_model(
-                unwrapped_model, (torchDDP, LocalDDP, Float16Module))
+    with nvtx.annotate("backward-embedding-all-reduce", color="yellow"):
+        timers('backward-embedding-all-reduce').start()
+        if not args.deepspeed:
+            if (mpu.is_pipeline_first_stage(ignore_virtual=True) or
+                mpu.is_pipeline_last_stage(ignore_virtual=True)) and \
+                    mpu.get_pipeline_model_parallel_world_size() > 1:
+                if mpu.is_pipeline_first_stage(ignore_virtual=True):
+                    unwrapped_model = model[0]
+                elif mpu.is_pipeline_last_stage(ignore_virtual=True):
+                    unwrapped_model = model[-1]
+                unwrapped_model = unwrap_model(
+                    unwrapped_model, (torchDDP, LocalDDP, Float16Module))
 
-            if unwrapped_model.share_word_embeddings:
-                word_embeddings_weight = unwrapped_model.word_embeddings_weight()
-                if args.DDP_impl == 'local':
-                    grad = word_embeddings_weight.main_grad
-                else:
-                    grad = word_embeddings_weight.grad
-                with nvtx.annotate('all reduce embedding grad', color='yellow')
+                if unwrapped_model.share_word_embeddings:
+                    word_embeddings_weight = unwrapped_model.word_embeddings_weight()
+                    if args.DDP_impl == 'local':
+                        grad = word_embeddings_weight.main_grad
+                    else:
+                        grad = word_embeddings_weight.grad
                     torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
-    timers('backward-embedding-all-reduce').stop()
+        timers('backward-embedding-all-reduce').stop()
 
     # Update parameters.
-    with nvtx.annotate("Update parameters", color="purple"):
+    with nvtx.annotate("optimizer", color="green"):
         timers('optimizer').start()
         if args.deepspeed:
             increment = get_num_microbatches() * \
@@ -994,6 +998,7 @@ def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler):
     timers.log(['save-checkpoint'])
 
 
+@nvtx.annotate("train", color="purple")
 def train(forward_step_func, model, optimizer, lr_scheduler,
           train_data_iterator, valid_data_iterator):
     """Train the model function."""

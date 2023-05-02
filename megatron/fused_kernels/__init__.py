@@ -25,7 +25,10 @@ from torch.utils import cpp_extension
 # leading to recompilation of fused kernels. Set it to empty string
 # to avoid recompilation and assign arch flags explicity in
 # extra_cuda_cflags below
-os.environ["TORCH_CUDA_ARCH_LIST"] = ""
+
+# sufkha: Ignore the comment above and set explicitly for our interest.
+# It may even no longer be true.
+os.environ["TORCH_CUDA_ARCH_LIST"] = "7.0;8.0;9.0"
 
 
 def load(args):
@@ -35,9 +38,6 @@ def load(args):
     if torch.version.hip is None:
         _, bare_metal_major, _ = _get_cuda_bare_metal_version(
             cpp_extension.CUDA_HOME)
-        if int(bare_metal_major) >= 11:
-            cc_flag.append('-gencode')
-            cc_flag.append('arch=compute_80,code=sm_80')
 
     # Build path
     srcpath = pathlib.Path(__file__).parent.absolute()
@@ -50,7 +50,6 @@ def load(args):
             extra_cuda_cflags=['-O3'] + extra_cuda_flags + cc_flag
         else:
             extra_cuda_cflags=['-O3',
-                               '-gencode', 'arch=compute_70,code=sm_70',
                                '--use_fast_math'] + extra_cuda_flags + cc_flag
 
         return cpp_extension.load(
