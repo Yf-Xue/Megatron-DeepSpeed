@@ -17,6 +17,7 @@
 
 import torch
 import torch.nn.functional as F
+import nvtx
 
 from megatron import get_args
 from megatron import mpu
@@ -378,26 +379,29 @@ class TransformerLanguageModel(MegatronModule):
 
         # Embeddings.
         if self.pre_process:
-            embedding_output = self.embedding(enc_input_ids, enc_position_ids,
-                                              tokentype_ids=tokentype_ids)
-            encoder_input = embedding_output
+            with nvtx.annotate('Pre_process embedding', color='orange'):
+                embedding_output = self.embedding(enc_input_ids, enc_position_ids,
+                                                tokentype_ids=tokentype_ids)
+                encoder_input = embedding_output
         else:
             encoder_input = None
 
         # encoder.
-        if enc_hidden_states is None:
-            encoder_output, *moe_losses = self.encoder(encoder_input,
-                                          enc_attn_mask,
-                                          layer_past=layer_past,
-                                          get_key_value=get_key_value)
-        else:
-            encoder_output = enc_hidden_states.to(encoder_input.dtype)
-            moe_losses = []
+        with nvtx.annotate('Encoding', color='pink'):
+            if enc_hidden_states is None:
+                encoder_output, *moe_losses = self.encoder(encoder_input,
+                                            enc_attn_mask,
+                                            layer_past=layer_past,
+                                            get_key_value=get_key_value)
+            else:
+                encoder_output = enc_hidden_states.to(encoder_input.dtype)
+                moe_losses = []
 
         if self.post_process:
-            if self.add_pooler:
-                pooled_output = self.pooler(encoder_output,
-                                            pooling_sequence_index)
+            with nvtx.annotate('Post_process', color='brown'):
+                if self.add_pooler:
+                    pooled_output = self.pooler(encoder_output,
+                                                pooling_sequence_index)
 
         # output_enc_hidden refers to when we just need the encoder's
         # output. For example, it is helpful to compute
@@ -409,15 +413,17 @@ class TransformerLanguageModel(MegatronModule):
                 return (encoder_output, *moe_losses)
 
         # Decoder Embedding
-        dec_embedding_output = self.embedding(dec_input_ids,
-                                              dec_position_ids)
+        with nvtx.annotate('Decoder embedding', color='green'):
+            dec_embedding_output = self.embedding(dec_input_ids,
+                                                dec_position_ids)
         # decoder
-        decoder_output, *moe_losses = self.decoder(dec_embedding_output,
-                                      dec_attn_mask,
-                                      layer_past=layer_past,
-                                      get_key_value=get_key_value,
-                                      encoder_output=encoder_output,
-                                      enc_dec_attn_mask=enc_dec_attn_mask)
+        with nvtx.annotate("Decoding", color='blue'):
+            decoder_output, *moe_losses = self.decoder(dec_embedding_output,
+                                        dec_attn_mask,
+                                        layer_past=layer_past,
+                                        get_key_value=get_key_value,
+                                        encoder_output=encoder_output,
+                                        enc_dec_attn_mask=enc_dec_attn_mask)
 
         if self.add_pooler and self.post_process:
             return (decoder_output, encoder_output, pooled_output, *moe_losses)
