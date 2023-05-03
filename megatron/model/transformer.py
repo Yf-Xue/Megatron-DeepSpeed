@@ -17,6 +17,7 @@
 import math
 import torch
 import torch.nn.functional as F
+import nvtx
 
 from megatron import get_args
 from megatron import mpu
@@ -465,6 +466,7 @@ class ParallelTransformerLayer(MegatronModule):
                             drop_tokens=args.moe_token_dropping, use_tutel=args.use_tutel,
                             enable_expert_tensor_parallelism=enable_expert_tensor_parallelism) 
 
+    @nvtx.annotate('Layer_forward', color='black')
     def forward(self, hidden_states, attention_mask=None,
                 encoder_output=None, enc_dec_attn_mask=None,
                 layer_past=None, get_key_value=False):
@@ -672,13 +674,15 @@ class ParallelTransformer(MegatronModule):
 
         self.layers = []
         # Build the layers
+        # TODO: add markers to each layer
         for i in range(self.num_layers):
             layer_num = i + 1 + offset
             if layer_num % args.expert_interval == 0:
                 n_e = num_experts[(layer_num-1) // args.expert_interval]
             else:
                 n_e = 1
-            self.layers.append(build_layer(layer_num, n_e))
+            with nvtx.annotate('Build layer-'+str(layer_num), color='white'):
+                self.layers.append(build_layer(layer_num, n_e))
 
         self.layers = torch.nn.ModuleList(self.layers)
 

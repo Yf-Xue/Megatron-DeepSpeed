@@ -89,7 +89,7 @@ def model_provider(pre_process=True, post_process=True):
     see_memory_usage(f"After Building Model", force=True)
     return model
 
-
+@nvtx.annotate('generate batch', color='blue')
 def get_batch(data_iterator):
     """Generate a batch"""
     args = get_args()
@@ -146,6 +146,7 @@ def data_post_process(data, data_sampler_state_dict):
             args.data_efficiency_curriculum_learning_seqlen_type = None
     return data
 
+@nvtx.annotate('generate batch pipe', color='orange')
 def get_batch_pipe(data):
     """Modification of `get_batch` to work on `next(data_iterator)` instead of `data_iterator`"""
     args = get_args()

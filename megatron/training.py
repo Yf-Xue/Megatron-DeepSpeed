@@ -144,7 +144,7 @@ def pretrain(train_valid_test_dataset_provider,
                    'scheduler are built')
 
     # Data stuff.
-    with nvtx.annotate("Dataloader build", color="purple"):
+    with nvtx.annotate("Build all data iterators", color="purple"):
         timers('train/valid/test-data-iterators-setup').start()
         if args.virtual_pipeline_model_parallel_size is not None:
             all_data_iterators = [
