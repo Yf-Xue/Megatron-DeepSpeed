@@ -681,7 +681,7 @@ class ParallelTransformer(MegatronModule):
                 n_e = num_experts[(layer_num-1) // args.expert_interval]
             else:
                 n_e = 1
-            with nvtx.annotate('Build layer-'+str(i), color='white'):
+            with nvtx.annotate('Build layer-'+str(layer_num), color='white'):
                 self.layers.append(build_layer(layer_num, n_e))
 
         self.layers = torch.nn.ModuleList(self.layers)
