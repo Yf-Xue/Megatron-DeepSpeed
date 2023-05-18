@@ -56,6 +56,7 @@ from megatron.schedules import forward_backward_pipelining_with_interleaving
 from megatron.utils import report_memory, throughput_calculator, checkpoint_throughput_calculator
 from deepspeed.accelerator import get_accelerator
 import deepspeed
+import deepspeed.comm as dist
 from deepspeed.compression.compress import init_compression, redundancy_clean
 
 
@@ -109,8 +110,8 @@ def pretrain(train_valid_test_dataset_provider,
     # image ... launches.
     global _TRAIN_START_TIME
     start_time_tensor = get_accelerator().FloatTensor([_TRAIN_START_TIME])
-    torch.distributed.all_reduce(start_time_tensor,
-                                 op=torch.distributed.ReduceOp.MIN)
+    dist.all_reduce(start_time_tensor,
+                                 op=dist.ReduceOp.MIN)
     _TRAIN_START_TIME = start_time_tensor.item()
     print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
         time.time() - _TRAIN_START_TIME))
@@ -650,7 +651,7 @@ def train_step(forward_step_func, data_iterator,
                         grad = word_embeddings_weight.main_grad
                     else:
                         grad = word_embeddings_weight.grad
-                    torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+                    dist.all_reduce(grad, group=mpu.get_embedding_group())
         timers('backward-embedding-all-reduce').stop()
 
     # Update parameters.
@@ -862,23 +863,23 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             if args.zero_stage > 0:
                 # ZeRO partiions optimizer states
                 opt_stats = get_accelerator().FloatTensor(opt_stats)
-                torch.distributed.all_reduce(opt_stats, group=mpu.get_data_parallel_group())
+                dist.all_reduce(opt_stats, group=mpu.get_data_parallel_group())
                 opt_stats_2 = get_accelerator().FloatTensor(opt_stats_2)
-                torch.distributed.all_reduce(opt_stats_2, op=torch.distributed.ReduceOp.MAX,
+                dist.all_reduce(opt_stats_2, op=dist.ReduceOp.MAX,
                     group=mpu.get_data_parallel_group())
 
             if args.tensor_model_parallel_size > 1:
                 opt_stats = get_accelerator().FloatTensor(opt_stats)
-                torch.distributed.all_reduce(opt_stats, group=mpu.get_tensor_model_parallel_group())
+                dist.all_reduce(opt_stats, group=mpu.get_tensor_model_parallel_group())
                 opt_stats_2 = get_accelerator().FloatTensor(opt_stats_2)
-                torch.distributed.all_reduce(opt_stats_2, op=torch.distributed.ReduceOp.MAX,
+                dist.all_reduce(opt_stats_2, op=dist.ReduceOp.MAX,
                     group=mpu.get_tensor_model_parallel_group())
 
             if args.pipeline_model_parallel_size > 1:
                 opt_stats = get_accelerator().FloatTensor(opt_stats)
-                torch.distributed.all_reduce(opt_stats, group=mpu.get_pipeline_model_parallel_group())
+                dist.all_reduce(opt_stats, group=mpu.get_pipeline_model_parallel_group())
                 opt_stats_2 = get_accelerator().FloatTensor(opt_stats_2)
-                torch.distributed.all_reduce(opt_stats_2, op=torch.distributed.ReduceOp.MAX,
+                dist.all_reduce(opt_stats_2, op=dist.ReduceOp.MAX,
                     group=mpu.get_pipeline_model_parallel_group())
 
             # print('step {} rank {} after sync opt_stats {}, {}'.format(iteration, torch.distributed.get_rank(), opt_stats_2, opt_stats))
@@ -981,6 +982,7 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             report_memory_flag = False
         timers.log(timers_to_log, normalizer=args.log_interval)
 
+        dist.log_summary()
 
     return report_memory_flag
 
@@ -1121,8 +1123,8 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
             train_time = (time.time() - _TRAIN_START_TIME) / 60.0
             done_cuda = get_accelerator().IntTensor(
                 [train_time > args.exit_duration_in_mins])
-            torch.distributed.all_reduce(
-                done_cuda, op=torch.distributed.ReduceOp.MAX)
+            dist.all_reduce(
+                done_cuda, op=dist.ReduceOp.MAX)
             done = done_cuda.item()
             if done:
                 if not saved_checkpoint:
@@ -1322,7 +1324,7 @@ def build_train_valid_test_data_iterators(
         flags = get_accelerator().LongTensor([0, 0, 0])
 
     # Broadcast num tokens.
-    torch.distributed.broadcast(flags,
+    dist.broadcast(flags,
                                 mpu.get_tensor_model_parallel_src_rank(),
                                 group=mpu.get_tensor_model_parallel_group())
     args.do_train = flags[0].item()
