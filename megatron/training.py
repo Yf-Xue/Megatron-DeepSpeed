@@ -68,8 +68,7 @@ def print_datetime(string):
     time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print_rank_0('[' + string + '] datetime: {} '.format(time_str))
 
-
-@nvtx.annotate("pretrain", color="white")
+@nvtx.annotate("Pretrain", color="white")
 def pretrain(train_valid_test_dataset_provider,
              model_provider,
              forward_step_func,
@@ -144,7 +143,7 @@ def pretrain(train_valid_test_dataset_provider,
                    'scheduler are built')
 
     # Data stuff.
-    with nvtx.annotate("Build all data iterators", color="purple"):
+    with nvtx.annotate("Build all data iterators", color="orange"):
         timers('train/valid/test-data-iterators-setup').start()
         if args.virtual_pipeline_model_parallel_size is not None:
             all_data_iterators = [
@@ -188,12 +187,17 @@ def pretrain(train_valid_test_dataset_provider,
     print('Model Params (B): {:.1f}'.format(get_parameters_in_billions(model)), flush=True)
     print_rank_0('training ...')
 
-    
     iteration = 0
     if args.do_train and args.train_iters > 0:
-        iteration = train(forward_step_func,
-                        model, optimizer, lr_scheduler,
-                        train_data_iterator, valid_data_iterator)
+        RANK_TENSOR_MODEL_PARALLEL_IDX = mpu.get_tensor_model_parallel_rank() # _TENSOR_MODEL_PARALLEL_GROUP
+        RANK_PIPELINE_MODEL_PARALLEL_IDX = mpu.get_pipeline_model_parallel_rank() # _PIPELINE_MODEL_PARALLEL_GROUP
+        RANK_DATA_PARALLEL_IDX = mpu.get_data_parallel_rank() # _DATA_PARALLEL_GROUP
+        nvtx_train_marker = "Train [T_{},P_{},D_{}]".format(RANK_TENSOR_MODEL_PARALLEL_IDX, 
+                                    RANK_PIPELINE_MODEL_PARALLEL_IDX, RANK_DATA_PARALLEL_IDX)
+        with nvtx.annotate(nvtx_train_marker, color="purple"):
+            iteration = train(forward_step_func,
+                            model, optimizer, lr_scheduler,
+                            train_data_iterator, valid_data_iterator)
     print_datetime('after training is done')
 
     if args.do_valid:
@@ -998,7 +1002,7 @@ def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler):
     timers.log(['save-checkpoint'])
 
 
-@nvtx.annotate("train", color="purple")
+# @nvtx.annotate("Train", color="purple")
 def train(forward_step_func, model, optimizer, lr_scheduler,
           train_data_iterator, valid_data_iterator):
     """Train the model function."""
